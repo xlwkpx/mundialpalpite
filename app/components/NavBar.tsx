@@ -48,11 +48,19 @@ export default function NavBar() {
 
         <nav className="nav-links">
           <Link className="nav-link" href="/player">
-            Jogos para adivinhar hoje
+            Jogos da próxima jornada
+          </Link>
+
+          <Link className="nav-link" href="/bets">
+            Apostas
           </Link>
 
           <Link className="nav-link" href="/leaderboard">
             Tabelas Classificativas
+          </Link>
+
+                    <Link className="nav-link" href="/rules">
+            Regras
           </Link>
 
           {profile?.role === 'admin' && (

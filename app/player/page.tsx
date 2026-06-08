@@ -144,6 +144,40 @@ export default function PlayerPage() {
     return 0;
   }
 
+  function getPickLabel(match: Match, pick?: string) {
+    if (pick === 'home') return `Vitória ${match.home_team}`;
+    if (pick === 'draw') return 'Empate';
+    if (pick === 'away') return `Vitória ${match.away_team}`;
+    return 'Escolher';
+  }
+
+  function validatePredictionForMatch(match: Match, prediction: PredictionInput) {
+    const homeScore = Number(prediction.predicted_home_score);
+    const awayScore = Number(prediction.predicted_away_score);
+
+    if (Number.isNaN(homeScore) || Number.isNaN(awayScore)) {
+      return `No jogo ${match.home_team} vs ${match.away_team}, o resultado tem de ser numérico.`;
+    }
+
+    if (homeScore < 0 || awayScore < 0) {
+      return `No jogo ${match.home_team} vs ${match.away_team}, os golos não podem ser negativos.`;
+    }
+
+    if (prediction.pick === 'home' && homeScore <= awayScore) {
+      return `No jogo ${match.home_team} vs ${match.away_team}, escolheste vitória ${match.home_team}, mas o resultado ${homeScore}-${awayScore} não dá vitória a ${match.home_team}.`;
+    }
+
+    if (prediction.pick === 'away' && awayScore <= homeScore) {
+      return `No jogo ${match.home_team} vs ${match.away_team}, escolheste vitória ${match.away_team}, mas o resultado ${homeScore}-${awayScore} não dá vitória a ${match.away_team}.`;
+    }
+
+    if (prediction.pick === 'draw' && homeScore !== awayScore) {
+      return `No jogo ${match.home_team} vs ${match.away_team}, escolheste empate, mas o resultado ${homeScore}-${awayScore} não é empate.`;
+    }
+
+    return null;
+  }
+
   const totals = useMemo(() => {
     let normalTotal = 0;
     let exactTotal = 0;
@@ -155,7 +189,7 @@ export default function PlayerPage() {
       normalTotal += odd;
 
       if (odd > 0) {
-        exactTotal += odd * 2;
+        exactTotal += odd + 2;
       }
     });
 
@@ -177,7 +211,9 @@ export default function PlayerPage() {
     }
 
     if (alreadySubmitted && !isEditing) {
-      setMessage('Já submeteste os palpites desta jornada. Carrega em “Alterar palpites de hoje” para modificar.');
+      setMessage(
+        'Já submeteste os palpites desta jornada. Carrega em “Alterar palpites desta jornada” para modificar.'
+      );
       return;
     }
 
@@ -191,6 +227,13 @@ export default function PlayerPage() {
         p.predicted_away_score === ''
       ) {
         setMessage('Erro a submeter: tens de preencher todos os jogos antes de submeter.');
+        return;
+      }
+
+      const validationError = validatePredictionForMatch(match, p);
+
+      if (validationError) {
+        setMessage(validationError);
         return;
       }
     }
@@ -234,15 +277,15 @@ export default function PlayerPage() {
       <NavBar />
 
       <main className="container">
-        <h1 className="page-title">Jogos para adivinhar hoje</h1>
+        <h1 className="page-title">Jogos da próxima jornada</h1>
 
         <p className="page-subtitle">
-          Só aparecem os jogos da próxima ronda aberta. Tens de preencher todos antes do prazo.
+          Só aparecem os jogos da próxima jornada aberta. Tens de preencher todos antes do prazo.
         </p>
 
         {activeDeadline && (
           <div className="card">
-            <strong>Prazo desta ronda:</strong>{' '}
+            <strong>Prazo desta jornada:</strong>{' '}
             {new Date(activeDeadline).toLocaleString('pt-PT')}
           </div>
         )}
@@ -253,7 +296,7 @@ export default function PlayerPage() {
 
             <div className="notice-actions">
               <button className="button secondary" onClick={startEditing}>
-                Alterar palpites de hoje
+                Alterar palpites desta jornada
               </button>
             </div>
           </div>
@@ -288,7 +331,7 @@ export default function PlayerPage() {
         {matches.map((match) => {
           const selectedPick = predictions[match.id]?.pick;
           const selectedOdd = getOdd(match, selectedPick);
-          const exactOdd = selectedOdd * 2;
+          const exactOdd = selectedOdd > 0 ? selectedOdd + 2 : 0;
 
           return (
             <div
@@ -302,8 +345,8 @@ export default function PlayerPage() {
               <p className="card-info">Data do jogo: {match.match_date}</p>
 
               <p className="card-info">
-                Odds: Casa {Number(match.odd_home).toFixed(2)} | Empate{' '}
-                {Number(match.odd_draw).toFixed(2)} | Fora{' '}
+                Odds: {match.home_team} {Number(match.odd_home).toFixed(2)} | Empate{' '}
+                {Number(match.odd_draw).toFixed(2)} | {match.away_team}{' '}
                 {Number(match.odd_away).toFixed(2)}
               </p>
 
@@ -317,14 +360,14 @@ export default function PlayerPage() {
                     onChange={(e) => updatePrediction(match.id, 'pick', e.target.value)}
                   >
                     <option value="">Escolher</option>
-                    <option value="home">Vitória Casa</option>
+                    <option value="home">Vitória {match.home_team}</option>
                     <option value="draw">Empate</option>
-                    <option value="away">Vitória Visitante</option>
+                    <option value="away">Vitória {match.away_team}</option>
                   </select>
                 </div>
 
                 <div>
-                  <label>Golos casa</label>
+                  <label>Golos {match.home_team}</label>
                   <input
                     className="input"
                     disabled={fieldsDisabled}
@@ -338,7 +381,7 @@ export default function PlayerPage() {
                 </div>
 
                 <div>
-                  <label>Golos fora</label>
+                  <label>Golos {match.away_team}</label>
                   <input
                     className="input"
                     disabled={fieldsDisabled}
@@ -355,13 +398,15 @@ export default function PlayerPage() {
               <div className="odds-box">
                 {selectedOdd > 0 ? (
                   <>
-                    <div>Estás a jogar para:</div>
+                    <div>
+                      Estás a jogar para: <strong>{getPickLabel(match, selectedPick)}</strong>
+                    </div>
                     <div className="odds-line">
                       <span className="odd-pill">
-                        Odd: {selectedOdd.toFixed(2)}
+                        Odd: {selectedOdd.toFixed(2)} pts
                       </span>
                       <span className="odd-pill exact">
-                        Odd com resultado correto: {exactOdd.toFixed(2)}
+                        Com resultado exato: {exactOdd.toFixed(2)} pts
                       </span>
                     </div>
                   </>
@@ -375,7 +420,7 @@ export default function PlayerPage() {
 
         {matches.length > 0 && (!alreadySubmitted || isEditing) && (
           <button className="button" onClick={submitPredictions}>
-            {alreadySubmitted ? 'Guardar alterações' : 'Submeter palpites desta ronda'}
+            {alreadySubmitted ? 'Guardar alterações' : 'Submeter palpites desta jornada'}
           </button>
         )}
 

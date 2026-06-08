@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -70,6 +71,10 @@ export default function LoginPage() {
         <button className="button" onClick={login}>
           Entrar
         </button>
+
+        <p style={{ marginTop: 18 }}>
+          Ainda não tens conta? <Link href="/register">Criar registo</Link>
+        </p>
 
         {message && <div className="message">{message}</div>}
       </div>

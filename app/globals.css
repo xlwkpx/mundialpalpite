@@ -52,6 +52,15 @@ a {
   color: #6b7280;
 }
 
+.login-card a {
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.login-card a:hover {
+  text-decoration: underline;
+}
+
 .input,
 .select {
   width: 100%;
@@ -66,6 +75,12 @@ a {
 .select:focus {
   outline: none;
   border-color: #111827;
+}
+
+.input:disabled,
+.select:disabled {
+  background: #f3f4f6;
+  cursor: not-allowed;
 }
 
 .form-group {
@@ -271,33 +286,6 @@ tr:last-child td {
   color: #166534;
 }
 
-@media (max-width: 700px) {
-  .navbar-inner {
-    flex-direction: column;
-    align-items: flex-start;
-    padding: 16px 0;
-  }
-
-  .nav-links {
-    width: 100%;
-  }
-
-  .nav-link,
-  .button {
-    width: 100%;
-    text-align: center;
-  }
-
-  .match-actions {
-    grid-template-columns: 1fr;
-  }
-
-  .admin-result-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-}
-
 .prediction-status {
   margin-bottom: 18px;
   padding: 14px 16px;
@@ -306,6 +294,10 @@ tr:last-child td {
   border: 1px solid #86efac;
   color: #166534;
   font-weight: 700;
+}
+
+.notice-actions {
+  margin-top: 12px;
 }
 
 .odds-box {
@@ -352,6 +344,10 @@ tr:last-child td {
   font-size: 24px;
 }
 
+.disabled-card {
+  opacity: 0.75;
+}
+
 .leaderboard-top {
   background: #ecfdf5;
 }
@@ -376,10 +372,170 @@ tr:last-child td {
   color: #991b1b;
 }
 
-.disabled-card {
-  opacity: 0.75;
+@media (max-width: 700px) {
+  .navbar-inner {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 16px 0;
+  }
+
+  .nav-links {
+    width: 100%;
+  }
+
+  .nav-link,
+  .button {
+    width: 100%;
+    text-align: center;
+  }
+
+  .match-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-result-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  @media (max-width: 700px) {
+  .container {
+    width: min(100% - 20px, 1100px);
+    padding: 18px 0;
+  }
+
+  .login-card {
+    padding: 24px;
+  }
+
+  .page-title {
+    font-size: 24px;
+  }
+
+  .page-subtitle {
+    font-size: 14px;
+  }
+
+  .card {
+    padding: 16px;
+    border-radius: 14px;
+  }
+
+  .brand {
+    font-size: 20px;
+  }
+
+  .nav-links {
+    gap: 8px;
+  }
+
+  .round-total strong {
+    font-size: 20px;
+  }
+
+  th,
+  td {
+    padding: 10px 12px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .score-inputs {
+    width: 100%;
+  }
+
+  .score-inputs input {
+    width: 100%;
+  }
+}
+.status-pill {
+  display: inline-block;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
-.notice-actions {
-  margin-top: 12px;
+select.select {
+  max-width: 100%;
+}
+
+.card label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 700;
+  color: #374151;
+}
+
+@media (max-width: 700px) {
+  .container {
+    width: min(100% - 20px, 1100px);
+    padding: 18px 0;
+  }
+
+  .login-card {
+    padding: 24px;
+  }
+
+  .page-title {
+    font-size: 24px;
+  }
+
+  .page-subtitle {
+    font-size: 14px;
+  }
+
+  .card {
+    padding: 16px;
+    border-radius: 14px;
+  }
+
+  .brand {
+    font-size: 20px;
+  }
+
+  .nav-links {
+    gap: 8px;
+  }
+
+  .round-total strong {
+    font-size: 20px;
+  }
+
+  th,
+  td {
+    padding: 10px 12px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .score-inputs {
+    width: 100%;
+  }
+
+  .score-inputs input {
+    width: 100%;
+  }
+
+  .rules-example {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 12px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+}
+
+.rules-example h3 {
+  margin-top: 0;
+}
+
+.rules-example p {
+  margin: 6px 0;
+}
+
+}
+
 }

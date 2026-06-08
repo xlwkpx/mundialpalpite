@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import NavBar from '@/app/components/NavBar';
 
@@ -12,6 +12,7 @@ type Match = {
   odd_home: number;
   odd_draw: number;
   odd_away: number;
+  deadline: string;
   home_score: number | null;
   away_score: number | null;
   status: string;
@@ -24,6 +25,13 @@ type Prediction = {
   pick: string;
   predicted_home_score: number;
   predicted_away_score: number;
+  points: number | null;
+};
+
+type Profile = {
+  id: string;
+  name: string;
+  role: string;
 };
 
 type ResultInput = {
@@ -31,8 +39,17 @@ type ResultInput = {
   away_score: string;
 };
 
+type Round = {
+  deadline: string;
+  label: string;
+  number: number;
+};
+
 export default function AdminPage() {
   const [matches, setMatches] = useState<Match[]>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [predictions, setPredictions] = useState<Prediction[]>([]);
+  const [selectedDeadline, setSelectedDeadline] = useState('');
   const [results, setResults] = useState<Record<string, ResultInput>>({});
   const [message, setMessage] = useState('');
   const [success, setSuccess] = useState('');
@@ -70,19 +87,41 @@ export default function AdminPage() {
       return;
     }
 
-    const { data, error } = await supabase
+    const { data: matchesData, error: matchesError } = await supabase
       .from('matches')
       .select('*')
+      .order('deadline', { ascending: true })
       .order('match_date', { ascending: true });
 
-    if (error) {
-      setMessage(`Erro a carregar jogos: ${error.message}`);
+    if (matchesError) {
+      setMessage(`Erro a carregar jogos: ${matchesError.message}`);
       return;
     }
 
-    const typedMatches = (data || []) as Match[];
+    const { data: profilesData, error: profilesError } = await supabase
+      .from('profiles')
+      .select('id, name, role')
+      .order('name', { ascending: true });
+
+    if (profilesError) {
+      setMessage(`Erro a carregar jogadores: ${profilesError.message}`);
+      return;
+    }
+
+    const { data: predictionsData, error: predictionsError } = await supabase
+      .from('predictions')
+      .select('*');
+
+    if (predictionsError) {
+      setMessage(`Erro a carregar apostas: ${predictionsError.message}`);
+      return;
+    }
+
+    const typedMatches = (matchesData || []) as Match[];
 
     setMatches(typedMatches);
+    setProfiles((profilesData || []) as Profile[]);
+    setPredictions((predictionsData || []) as Prediction[]);
 
     const initialResults: Record<string, ResultInput> = {};
 
@@ -94,7 +133,46 @@ export default function AdminPage() {
     });
 
     setResults(initialResults);
+
+    if (typedMatches.length > 0 && !selectedDeadline) {
+      const now = new Date().toISOString();
+      const nextOpenMatch = typedMatches.find((match) => match.deadline > now);
+
+      if (nextOpenMatch) {
+        setSelectedDeadline(nextOpenMatch.deadline);
+      } else {
+        setSelectedDeadline(typedMatches[typedMatches.length - 1].deadline);
+      }
+    }
   }
+
+  const rounds: Round[] = useMemo(() => {
+    const uniqueDeadlines = Array.from(
+      new Set(matches.map((match) => match.deadline))
+    );
+
+    return uniqueDeadlines.map((deadline, index) => {
+      const roundMatches = matches.filter((match) => match.deadline === deadline);
+      const dates = Array.from(new Set(roundMatches.map((match) => match.match_date)));
+
+      const dayText =
+        dates.length === 1
+          ? `jogos dia ${dates[0]}`
+          : `jogos dias ${dates[0]} a ${dates[dates.length - 1]}`;
+
+      return {
+        deadline,
+        number: index + 1,
+        label: `Jornada ${index + 1} — ${dayText} — prazo ${new Date(deadline).toLocaleString('pt-PT')}`,
+      };
+    });
+  }, [matches]);
+
+  const selectedMatches = matches.filter(
+    (match) => match.deadline === selectedDeadline
+  );
+
+  const selectedRound = rounds.find((round) => round.deadline === selectedDeadline);
 
   function updateResult(matchId: string, field: keyof ResultInput, value: string) {
     setResults((prev) => ({
@@ -119,6 +197,52 @@ export default function AdminPage() {
     if (pick === 'away') return Number(match.odd_away);
     return 0;
   }
+
+  function getPrediction(userId: string, matchId: string) {
+    return predictions.find(
+      (prediction) =>
+        prediction.user_id === userId && prediction.match_id === matchId
+    );
+  }
+
+  function getShortStatusForPlayer(userId: string) {
+    const now = new Date();
+    const deadline = selectedDeadline ? new Date(selectedDeadline) : null;
+
+    const playerPredictions = selectedMatches.map((match) =>
+      getPrediction(userId, match.id)
+    );
+
+    const hasAll = playerPredictions.every(Boolean);
+
+    if (hasAll) return 'Apostou';
+
+    if (deadline && now > deadline) {
+      return 'Não apostou';
+    }
+
+    return 'Por apostar';
+  }
+
+  function getRoundPoints(userId: string) {
+    return selectedMatches.reduce((sum, match) => {
+      const prediction = getPrediction(userId, match.id);
+      return sum + Number(prediction?.points || 0);
+    }, 0);
+  }
+
+  const sortedProfilesForSummary = useMemo(() => {
+    return [...profiles].sort((a, b) => {
+      const pointsA = getRoundPoints(a.id);
+      const pointsB = getRoundPoints(b.id);
+
+      if (pointsB !== pointsA) {
+        return pointsB - pointsA;
+      }
+
+      return a.name.localeCompare(b.name);
+    });
+  }, [profiles, predictions, selectedDeadline, matches]);
 
   async function submitResultAndCalculate(match: Match) {
     setMessage('');
@@ -160,20 +284,20 @@ export default function AdminPage() {
       return;
     }
 
-    const { data: predictions, error: predictionsError } = await supabase
+    const { data: matchPredictions, error: predictionsError } = await supabase
       .from('predictions')
       .select('*')
       .eq('match_id', match.id);
 
     if (predictionsError) {
       setMessage(
-        `Resultado guardado, mas houve erro a carregar palpites: ${predictionsError.message}`
+        `Resultado guardado, mas houve erro a carregar apostas: ${predictionsError.message}`
       );
       return;
     }
 
-    const typedPredictions = (predictions || []) as Prediction[];
     const actualPick = getActualPick(homeScore, awayScore);
+    const typedPredictions = (matchPredictions || []) as Prediction[];
 
     const updates = typedPredictions.map((prediction) => {
       let points = 0;
@@ -188,7 +312,7 @@ export default function AdminPage() {
           prediction.predicted_away_score === awayScore;
 
         if (exactScore) {
-          points = points * 2;
+          points = points + 2;
         }
       }
 
@@ -199,7 +323,6 @@ export default function AdminPage() {
     });
 
     const updateResults = await Promise.all(updates);
-
     const failedUpdate = updateResults.find((res) => res.error);
 
     if (failedUpdate?.error) {
@@ -216,6 +339,49 @@ export default function AdminPage() {
     await load();
   }
 
+  async function reopenMatch(match: Match) {
+    setMessage('');
+    setSuccess('');
+
+    const confirmed = window.confirm(
+      `Tens a certeza que queres reabrir ${match.home_team} vs ${match.away_team}? O resultado será apagado e os pontos deste jogo voltam a 0.`
+    );
+
+    if (!confirmed) return;
+
+    const { error: matchError } = await supabase
+      .from('matches')
+      .update({
+        home_score: null,
+        away_score: null,
+        status: 'open',
+      })
+      .eq('id', match.id);
+
+    if (matchError) {
+      setMessage(`Erro ao reabrir jogo: ${matchError.message}`);
+      return;
+    }
+
+    const { error: predictionsError } = await supabase
+      .from('predictions')
+      .update({ points: 0 })
+      .eq('match_id', match.id);
+
+    if (predictionsError) {
+      setMessage(
+        `Jogo reaberto, mas houve erro ao limpar pontos: ${predictionsError.message}`
+      );
+      return;
+    }
+
+    setSuccess(
+      `Jogo reaberto com sucesso. Resultado apagado e pontos de ${match.home_team} vs ${match.away_team} repostos a 0.`
+    );
+
+    await load();
+  }
+
   return (
     <div className="page">
       <NavBar />
@@ -224,22 +390,43 @@ export default function AdminPage() {
         <h1 className="page-title">Administração</h1>
 
         <p className="page-subtitle">
-          Submete o resultado final de cada jogo. Os pontos desse jogo são
-          calculados automaticamente.
+          Seleciona uma jornada, submete resultados e consulta os pontos feitos nessa jornada.
         </p>
 
         {message && <div className="message">{message}</div>}
         {success && <div className="success-message">{success}</div>}
 
-        {matches.map((match) => (
+        <div className="card">
+          <label>Selecionar jornada</label>
+
+          <select
+            className="select"
+            value={selectedDeadline}
+            onChange={(e) => setSelectedDeadline(e.target.value)}
+          >
+            {rounds.map((round) => (
+              <option key={round.deadline} value={round.deadline}>
+                {round.label}
+              </option>
+            ))}
+          </select>
+
+          {selectedRound && (
+            <p className="card-info" style={{ marginTop: 10 }}>
+              A gerir: <strong>Jornada {selectedRound.number}</strong>
+            </p>
+          )}
+        </div>
+
+        {selectedMatches.map((match) => (
           <div className="card" key={match.id}>
             <h3>
               {match.match_date} — {match.home_team} vs {match.away_team}
             </h3>
 
             <p className="card-info">
-              Odds: Casa {Number(match.odd_home).toFixed(2)} | Empate{' '}
-              {Number(match.odd_draw).toFixed(2)} | Fora{' '}
+              Odds: {match.home_team} {Number(match.odd_home).toFixed(2)} | Empate{' '}
+              {Number(match.odd_draw).toFixed(2)} | {match.away_team}{' '}
               {Number(match.odd_away).toFixed(2)}
             </p>
 
@@ -265,7 +452,7 @@ export default function AdminPage() {
                   className="input"
                   type="number"
                   min="0"
-                  placeholder="Casa"
+                  placeholder={match.home_team}
                   value={results[match.id]?.home_score || ''}
                   onChange={(e) =>
                     updateResult(match.id, 'home_score', e.target.value)
@@ -278,7 +465,7 @@ export default function AdminPage() {
                   className="input"
                   type="number"
                   min="0"
-                  placeholder="Fora"
+                  placeholder={match.away_team}
                   value={results[match.id]?.away_score || ''}
                   onChange={(e) =>
                     updateResult(match.id, 'away_score', e.target.value)
@@ -294,12 +481,55 @@ export default function AdminPage() {
                   ? 'Atualizar resultado e recalcular pontos'
                   : 'Submeter resultado e calcular pontos'}
               </button>
+
+              {match.status === 'final' && (
+                <button
+                  className="button secondary"
+                  onClick={() => reopenMatch(match)}
+                >
+                  Reabrir jogo
+                </button>
+              )}
             </div>
           </div>
         ))}
 
-        {matches.length === 0 && (
-          <div className="card">Ainda não existem jogos importados.</div>
+        {selectedMatches.length === 0 && (
+          <div className="card">Não há jogos nesta jornada.</div>
+        )}
+
+        {selectedMatches.length > 0 && (
+          <div className="card">
+            <h2>Pontos desta jornada</h2>
+
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Posição</th>
+                    <th>Jogador</th>
+                    <th>Estado</th>
+                    <th>Pontos da jornada</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {sortedProfilesForSummary.map((profile, index) => (
+                    <tr key={profile.id}>
+                      <td>{index + 1}</td>
+                      <td>{profile.name}</td>
+                      <td>
+                        <span className="status-pill">
+                          {getShortStatusForPlayer(profile.id)}
+                        </span>
+                      </td>
+                      <td>{getRoundPoints(profile.id).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
       </main>
     </div>
