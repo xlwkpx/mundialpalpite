@@ -7,6 +7,7 @@ import NavBar from '@/app/components/NavBar';
 type Match = {
   id: string;
   match_date: string;
+  kickoff_at: string | null;
   home_team: string;
   away_team: string;
   odd_home: number;
@@ -15,24 +16,77 @@ type Match = {
   deadline: string;
 };
 
+type Prediction = {
+  id: string;
+  user_id: string;
+  match_id: string;
+  pick: string;
+  predicted_home_score: number;
+  predicted_away_score: number;
+  submitted_at: string | null;
+};
+
 type PredictionInput = {
   pick: string;
   predicted_home_score: string;
   predicted_away_score: string;
 };
 
+function formatPortugalDateTime(value: string | null) {
+  if (!value) return 'Hora por definir';
+
+  return new Intl.DateTimeFormat('pt-PT', {
+    timeZone: 'Europe/Lisbon',
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(new Date(value));
+}
+
+function formatPortugalTime(value: string | null) {
+  if (!value) return 'Hora por definir';
+
+  return new Intl.DateTimeFormat('pt-PT', {
+    timeZone: 'Europe/Lisbon',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
+function formatCountdown(milliseconds: number) {
+  if (milliseconds <= 0) {
+    return '00:00:00';
+  }
+
+  const totalSeconds = Math.floor(milliseconds / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  const pad = (value: number) => String(value).padStart(2, '0');
+
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+}
+
 export default function PlayerPage() {
-  const [userId, setUserId] = useState<string | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
   const [predictions, setPredictions] = useState<Record<string, PredictionInput>>({});
-  const [activeDeadline, setActiveDeadline] = useState<string | null>(null);
   const [alreadySubmitted, setAlreadySubmitted] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
+  const [isEditing, setIsEditing] = useState(true);
   const [message, setMessage] = useState('');
   const [success, setSuccess] = useState('');
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(Date.now());
 
   useEffect(() => {
     load();
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
+    return () => window.clearInterval(interval);
   }, []);
 
   async function load() {
@@ -48,84 +102,107 @@ export default function PlayerPage() {
       return;
     }
 
-    setUserId(session.user.id);
-
     const now = new Date().toISOString();
 
-    const { data, error } = await supabase
+    const { data: matchesData, error: matchesError } = await supabase
       .from('matches')
-      .select('*')
+      .select(
+        'id, match_date, kickoff_at, home_team, away_team, odd_home, odd_draw, odd_away, deadline'
+      )
       .gt('deadline', now)
       .order('deadline', { ascending: true })
-      .order('match_date', { ascending: true });
+      .order('match_date', { ascending: true })
+      .order('kickoff_at', { ascending: true });
 
-    if (error) {
-      setMessage(`Erro a carregar jogos: ${error.message}`);
+    if (matchesError) {
+      setMessage(`Erro a carregar jogos: ${matchesError.message}`);
       return;
     }
 
-    const upcomingMatches = (data || []) as Match[];
+    const upcomingMatches = (matchesData || []) as Match[];
 
     if (upcomingMatches.length === 0) {
       setMatches([]);
-      setActiveDeadline(null);
-      setAlreadySubmitted(false);
-      setIsEditing(false);
-      return;
-    }
-
-    const nextDeadline = upcomingMatches[0].deadline;
-    setActiveDeadline(nextDeadline);
-
-    const nextDeadlineTime = new Date(nextDeadline).getTime();
-
-    const matchesForNextDeadline = upcomingMatches.filter((match) => {
-      return new Date(match.deadline).getTime() === nextDeadlineTime;
-    });
-
-    setMatches(matchesForNextDeadline);
-
-    const matchIds = matchesForNextDeadline.map((match) => match.id);
-
-    if (matchIds.length === 0) {
       setPredictions({});
       setAlreadySubmitted(false);
       setIsEditing(false);
+      setLastSavedAt(null);
       return;
     }
 
-    const { data: existingPredictions, error: predictionsError } = await supabase
+    const firstDeadline = upcomingMatches[0].deadline;
+
+    const roundMatches = upcomingMatches.filter(
+      (match) => match.deadline === firstDeadline
+    );
+
+    setMatches(roundMatches);
+
+    const matchIds = roundMatches.map((match) => match.id);
+
+    const { data: predictionsData, error: predictionsError } = await supabase
       .from('predictions')
-      .select('match_id, pick, predicted_home_score, predicted_away_score')
+      .select(
+        'id, user_id, match_id, pick, predicted_home_score, predicted_away_score, submitted_at'
+      )
       .eq('user_id', session.user.id)
       .in('match_id', matchIds);
 
     if (predictionsError) {
-      setMessage(`Erro a carregar palpites: ${predictionsError.message}`);
+      setMessage(`Erro a carregar os teus palpites: ${predictionsError.message}`);
       return;
     }
 
-    const existing: Record<string, PredictionInput> = {};
+    const existingPredictions = (predictionsData || []) as Prediction[];
 
-    existingPredictions?.forEach((p) => {
-      existing[p.match_id] = {
-        pick: p.pick,
-        predicted_home_score: String(p.predicted_home_score),
-        predicted_away_score: String(p.predicted_away_score),
+    const initialInputs: Record<string, PredictionInput> = {};
+
+    roundMatches.forEach((match) => {
+      const existing = existingPredictions.find(
+        (prediction) => prediction.match_id === match.id
+      );
+
+      initialInputs[match.id] = {
+        pick: existing?.pick || '',
+        predicted_home_score:
+          existing?.predicted_home_score === undefined
+            ? ''
+            : String(existing.predicted_home_score),
+        predicted_away_score:
+          existing?.predicted_away_score === undefined
+            ? ''
+            : String(existing.predicted_away_score),
       };
     });
 
-    setPredictions(existing);
+    setPredictions(initialInputs);
 
-    const submittedAllMatches = matchIds.every((matchId) => Boolean(existing[matchId]));
+    const hasAllPredictions =
+      matchIds.length > 0 &&
+      matchIds.every((matchId) =>
+        existingPredictions.some((prediction) => prediction.match_id === matchId)
+      );
 
-    setAlreadySubmitted(submittedAllMatches);
-    setIsEditing(!submittedAllMatches);
+    setAlreadySubmitted(hasAllPredictions);
+    setIsEditing(!hasAllPredictions);
+
+    const savedDates = existingPredictions
+      .map((prediction) => prediction.submitted_at)
+      .filter(Boolean) as string[];
+
+    if (savedDates.length > 0) {
+      const latestSavedAt = savedDates.sort().reverse()[0];
+      setLastSavedAt(latestSavedAt);
+    } else {
+      setLastSavedAt(null);
+    }
   }
 
-  function updatePrediction(matchId: string, field: keyof PredictionInput, value: string) {
-    if (alreadySubmitted && !isEditing) return;
-
+  function updatePrediction(
+    matchId: string,
+    field: keyof PredictionInput,
+    value: string
+  ) {
     setPredictions((prev) => ({
       ...prev,
       [matchId]: {
@@ -137,295 +214,380 @@ export default function PlayerPage() {
     }));
   }
 
-  function getOdd(match: Match, pick?: string) {
-    if (pick === 'home') return Number(match.odd_home);
-    if (pick === 'draw') return Number(match.odd_draw);
-    if (pick === 'away') return Number(match.odd_away);
+  function getSelectedOdd(match: Match) {
+    const prediction = predictions[match.id];
+
+    if (!prediction) return 0;
+
+    if (prediction.pick === 'home') return Number(match.odd_home);
+    if (prediction.pick === 'draw') return Number(match.odd_draw);
+    if (prediction.pick === 'away') return Number(match.odd_away);
+
     return 0;
   }
 
-  function getPickLabel(match: Match, pick?: string) {
-    if (pick === 'home') return `Vitória ${match.home_team}`;
-    if (pick === 'draw') return 'Empate';
-    if (pick === 'away') return `Vitória ${match.away_team}`;
-    return 'Escolher';
+  function getSelectedPickLabel(match: Match) {
+    const prediction = predictions[match.id];
+
+    if (!prediction) return '';
+
+    if (prediction.pick === 'home') return `Vitória ${match.home_team}`;
+    if (prediction.pick === 'draw') return 'Empate';
+    if (prediction.pick === 'away') return `Vitória ${match.away_team}`;
+
+    return '';
   }
 
-  function validatePredictionForMatch(match: Match, prediction: PredictionInput) {
-    const homeScore = Number(prediction.predicted_home_score);
-    const awayScore = Number(prediction.predicted_away_score);
+  function isRoundComplete() {
+    return matches.every((match) => {
+      const prediction = predictions[match.id];
 
-    if (Number.isNaN(homeScore) || Number.isNaN(awayScore)) {
-      return `No jogo ${match.home_team} vs ${match.away_team}, o resultado tem de ser numérico.`;
-    }
-
-    if (homeScore < 0 || awayScore < 0) {
-      return `No jogo ${match.home_team} vs ${match.away_team}, os golos não podem ser negativos.`;
-    }
-
-    if (prediction.pick === 'home' && homeScore <= awayScore) {
-      return `No jogo ${match.home_team} vs ${match.away_team}, escolheste vitória ${match.home_team}, mas o resultado ${homeScore}-${awayScore} não dá vitória a ${match.home_team}.`;
-    }
-
-    if (prediction.pick === 'away' && awayScore <= homeScore) {
-      return `No jogo ${match.home_team} vs ${match.away_team}, escolheste vitória ${match.away_team}, mas o resultado ${homeScore}-${awayScore} não dá vitória a ${match.away_team}.`;
-    }
-
-    if (prediction.pick === 'draw' && homeScore !== awayScore) {
-      return `No jogo ${match.home_team} vs ${match.away_team}, escolheste empate, mas o resultado ${homeScore}-${awayScore} não é empate.`;
-    }
-
-    return null;
-  }
-
-  const totals = useMemo(() => {
-    let normalTotal = 0;
-    let exactTotal = 0;
-
-    matches.forEach((match) => {
-      const pick = predictions[match.id]?.pick;
-      const odd = getOdd(match, pick);
-
-      normalTotal += odd;
-
-      if (odd > 0) {
-        exactTotal += odd + 2;
-      }
+      return (
+        prediction &&
+        prediction.pick !== '' &&
+        prediction.predicted_home_score !== '' &&
+        prediction.predicted_away_score !== ''
+      );
     });
+  }
 
-    return {
-      normalTotal,
-      exactTotal,
-    };
+  const remainingGames = useMemo(() => {
+    return matches.filter((match) => {
+      const prediction = predictions[match.id];
+
+      return (
+        !prediction ||
+        prediction.pick === '' ||
+        prediction.predicted_home_score === '' ||
+        prediction.predicted_away_score === ''
+      );
+    }).length;
   }, [matches, predictions]);
+
+  const normalPotential = useMemo(() => {
+    return matches.reduce((sum, match) => {
+      return sum + getSelectedOdd(match);
+    }, 0);
+  }, [matches, predictions]);
+
+  const exactPotential = useMemo(() => {
+    return matches.reduce((sum, match) => {
+      return sum + getSelectedOdd(match) * 2;
+    }, 0);
+  }, [matches, predictions]);
+
+  const roundDeadline = matches.length > 0 ? matches[0].deadline : null;
+
+  const countdownMs = roundDeadline
+    ? new Date(roundDeadline).getTime() - nowMs
+    : 0;
+
+  const deadlineHasPassed = countdownMs <= 0;
 
   async function submitPredictions() {
     setMessage('');
     setSuccess('');
 
-    if (!userId) return;
-
-    if (matches.length === 0) {
-      setMessage('Não há jogos abertos.');
+    if (alreadySubmitted && !isEditing) {
+      setMessage('Já submeteste os palpites desta jornada. Clica em alterar para editar.');
       return;
     }
 
-    if (alreadySubmitted && !isEditing) {
+    if (deadlineHasPassed) {
+      setMessage('O prazo desta jornada já fechou. Já não é possível submeter ou alterar palpites.');
+      return;
+    }
+
+    if (!isRoundComplete()) {
       setMessage(
-        'Já submeteste os palpites desta jornada. Carrega em “Alterar palpites desta jornada” para modificar.'
+        `Tens de preencher todos os jogos antes de submeter. Faltam ${remainingGames} jogo(s).`
       );
       return;
     }
 
-    for (const match of matches) {
-      const p = predictions[match.id];
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-      if (
-        !p ||
-        !p.pick ||
-        p.predicted_home_score === '' ||
-        p.predicted_away_score === ''
-      ) {
-        setMessage('Erro a submeter: tens de preencher todos os jogos antes de submeter.');
-        return;
-      }
-
-      const validationError = validatePredictionForMatch(match, p);
-
-      if (validationError) {
-        setMessage(validationError);
-        return;
-      }
+    if (!session) {
+      window.location.href = '/login';
+      return;
     }
 
-    const rows = matches.map((match) => {
-      const p = predictions[match.id];
+    const now = new Date().toISOString();
+
+    const rowsToSave = matches.map((match) => {
+      const prediction = predictions[match.id];
 
       return {
-        user_id: userId,
+        user_id: session.user.id,
         match_id: match.id,
-        pick: p.pick,
-        predicted_home_score: Number(p.predicted_home_score),
-        predicted_away_score: Number(p.predicted_away_score),
+        pick: prediction.pick,
+        predicted_home_score: Number(prediction.predicted_home_score),
+        predicted_away_score: Number(prediction.predicted_away_score),
+        submitted_at: now,
       };
     });
 
     const { error } = await supabase
       .from('predictions')
-      .upsert(rows, { onConflict: 'user_id,match_id' });
+      .upsert(rowsToSave, {
+        onConflict: 'user_id,match_id',
+      });
 
     if (error) {
-      setMessage(`Erro a submeter palpites: ${error.message}`);
+      setMessage(`Erro a guardar palpites: ${error.message}`);
       return;
     }
 
-    setSuccess('Palpites submetidos com sucesso.');
+    setSuccess('Apostas guardadas com sucesso.');
+    setLastSavedAt(now);
     setAlreadySubmitted(true);
     setIsEditing(false);
   }
 
-  function startEditing() {
-    setMessage('');
-    setSuccess('');
-    setIsEditing(true);
-  }
-
   const fieldsDisabled = alreadySubmitted && !isEditing;
+  const submitDisabled = !isRoundComplete() || deadlineHasPassed;
 
   return (
     <div className="page">
       <NavBar />
 
       <main className="container">
-        <h1 className="page-title">Jogos da próxima jornada</h1>
+        <div className="page-title-row">
+          <div>
+            <h1 className="page-title">Jogos para adivinhar hoje</h1>
 
-        <p className="page-subtitle">
-          Só aparecem os jogos da próxima jornada aberta. Tens de preencher todos antes do prazo.
-        </p>
+            <p className="page-subtitle">
+              Faz os teus palpites para a próxima jornada aberta.
+            </p>
+          </div>
 
-        {activeDeadline && (
+          {matches.length > 0 && (
+            <div className="title-countdown-box">
+  <div>
+    <span>Apostas fecham em:</span>
+    <strong>
+      {deadlineHasPassed ? 'Fechado' : formatCountdown(countdownMs)}
+    </strong>
+  </div>
+</div>
+          )}
+        </div>
+
+        {message && <div className="message">{message}</div>}
+        {success && <div className="success-message">{success}</div>}
+
+        {matches.length === 0 && (
           <div className="card">
-            <strong>Prazo desta jornada:</strong>{' '}
-            {new Date(activeDeadline).toLocaleString('pt-PT')}
-          </div>
-        )}
-
-        {alreadySubmitted && !isEditing && (
-          <div className="prediction-status">
-            Já submeteste os palpites desta jornada.
-
-            <div className="notice-actions">
-              <button className="button secondary" onClick={startEditing}>
-                Alterar palpites desta jornada
-              </button>
-            </div>
-          </div>
-        )}
-
-        {alreadySubmitted && isEditing && (
-          <div className="message">
-            Estás a alterar os palpites desta jornada. Tens de voltar a submeter para guardar.
+            Não existem jogos abertos para apostar neste momento.
           </div>
         )}
 
         {matches.length > 0 && (
-          <div className="round-total">
-            <div>Total potencial da jornada</div>
-            <p>
-              Se acertares os vencedores/empates:{' '}
-              <strong>{totals.normalTotal.toFixed(2)} pts</strong>
-            </p>
-            <p>
-              Se acertares também todos os resultados exatos:{' '}
-              <strong>{totals.exactTotal.toFixed(2)} pts</strong>
-            </p>
-          </div>
-        )}
-
-        {matches.length === 0 && (
-          <div className="card">
-            Não há jogos abertos para palpitar neste momento.
-          </div>
-        )}
-
-        {matches.map((match) => {
-          const selectedPick = predictions[match.id]?.pick;
-          const selectedOdd = getOdd(match, selectedPick);
-          const exactOdd = selectedOdd > 0 ? selectedOdd + 2 : 0;
-
-          return (
-            <div
-              className={`card ${fieldsDisabled ? 'disabled-card' : ''}`}
-              key={match.id}
-            >
-              <h3>
-                {match.home_team} vs {match.away_team}
-              </h3>
-
-              <p className="card-info">Data do jogo: {match.match_date}</p>
-
-              <p className="card-info">
-                Odds: {match.home_team} {Number(match.odd_home).toFixed(2)} | Empate{' '}
-                {Number(match.odd_draw).toFixed(2)} | {match.away_team}{' '}
-                {Number(match.odd_away).toFixed(2)}
-              </p>
-
-              <div className="match-actions">
-                <div>
-                  <label>Palpite</label>
-                  <select
-                    className="select"
-                    disabled={fieldsDisabled}
-                    value={predictions[match.id]?.pick || ''}
-                    onChange={(e) => updatePrediction(match.id, 'pick', e.target.value)}
-                  >
-                    <option value="">Escolher</option>
-                    <option value="home">Vitória {match.home_team}</option>
-                    <option value="draw">Empate</option>
-                    <option value="away">Vitória {match.away_team}</option>
-                  </select>
+          <>
+            <div className="card">
+              <div className="round-info-grid">
+                <div className="round-info-card">
+                  <span>Jogos da jornada</span>
+                  <strong>{matches.length}</strong>
                 </div>
 
-                <div>
-                  <label>Golos {match.home_team}</label>
-                  <input
-                    className="input"
-                    disabled={fieldsDisabled}
-                    type="number"
-                    min="0"
-                    value={predictions[match.id]?.predicted_home_score || ''}
-                    onChange={(e) =>
-                      updatePrediction(match.id, 'predicted_home_score', e.target.value)
-                    }
-                  />
+                <div className="round-info-card">
+                  <span>Por preencher</span>
+                  <strong>{remainingGames}</strong>
                 </div>
 
-                <div>
-                  <label>Golos {match.away_team}</label>
-                  <input
-                    className="input"
-                    disabled={fieldsDisabled}
-                    type="number"
-                    min="0"
-                    value={predictions[match.id]?.predicted_away_score || ''}
-                    onChange={(e) =>
-                      updatePrediction(match.id, 'predicted_away_score', e.target.value)
-                    }
-                  />
+                <div className="round-info-card">
+                  <span>Prazo</span>
+                  <strong>{formatPortugalDateTime(matches[0].deadline)}</strong>
                 </div>
               </div>
 
-              <div className="odds-box">
-                {selectedOdd > 0 ? (
-                  <>
+              {alreadySubmitted && !isEditing && (
+                <div className="prediction-status" style={{ marginTop: 14 }}>
+                  Já submeteste os teus palpites desta jornada.
+                  {lastSavedAt && (
+                    <>
+                      {' '}
+                      Aposta guardada às{' '}
+                      <strong>{formatPortugalTime(lastSavedAt)}</strong>.
+                    </>
+                  )}
+
+                  {!deadlineHasPassed && (
+                    <div className="notice-actions">
+                      <button
+                        className="button secondary"
+                        onClick={() => setIsEditing(true)}
+                      >
+                        Alterar palpites de hoje
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {isEditing && (
+                <div className="message neutral-message" style={{ marginTop: 14 }}>
+                  Preenche todos os jogos antes de submeter.
+                  {remainingGames > 0 && (
+                    <>
+                      {' '}
+                      Ainda faltam <strong>{remainingGames}</strong> jogo(s).
+                    </>
+                  )}
+                </div>
+              )}
+
+              {deadlineHasPassed && (
+                <div className="message" style={{ marginTop: 14 }}>
+                  O prazo desta jornada já fechou. Já não é possível submeter ou alterar palpites.
+                </div>
+              )}
+            </div>
+
+            <div className="round-total">
+              <p>Potencial da jornada</p>
+              <strong>{normalPotential.toFixed(2)} pontos</strong>
+              <span>
+                {' '}
+                se acertares os resultados escolhidos. Com resultados exatos:{' '}
+                <strong>{exactPotential.toFixed(2)} pontos</strong>
+              </span>
+            </div>
+
+            {matches.map((match) => {
+              const prediction = predictions[match.id];
+              const selectedOdd = getSelectedOdd(match);
+              const selectedPickLabel = getSelectedPickLabel(match);
+
+              return (
+                <div
+                  className={fieldsDisabled ? 'card disabled-card' : 'card'}
+                  key={match.id}
+                >
+                  <h3>
+                    {match.home_team} vs {match.away_team}
+                  </h3>
+
+                  <p className="card-info">
+                    Data do jogo:{' '}
+                    <strong>
+                      {match.kickoff_at
+                        ? formatPortugalDateTime(match.kickoff_at)
+                        : match.match_date}
+                    </strong>
+                  </p>
+
+                
+
+                  <div className="form-grid">
                     <div>
-                      Estás a jogar para: <strong>{getPickLabel(match, selectedPick)}</strong>
+                      <label>Resultado apostado</label>
+
+                      <select
+                        className="select"
+                        value={prediction?.pick || ''}
+                        disabled={fieldsDisabled || deadlineHasPassed}
+                        onChange={(e) =>
+                          updatePrediction(match.id, 'pick', e.target.value)
+                        }
+                      >
+                        <option value="">Escolher...</option>
+                        <option value="home">Vitória {match.home_team}</option>
+                        <option value="draw">Empate</option>
+                        <option value="away">Vitória {match.away_team}</option>
+                      </select>
                     </div>
-                    <div className="odds-line">
-                      <span className="odd-pill">
-                        Odd: {selectedOdd.toFixed(2)} pts
-                      </span>
-                      <span className="odd-pill exact">
-                        Com resultado exato: {exactOdd.toFixed(2)} pts
-                      </span>
+
+                    <div>
+                      <label>Resultado exato</label>
+
+                      <div className="score-inputs">
+                        <input
+                          className="input"
+                          type="number"
+                          min="0"
+                          placeholder={match.home_team}
+                          value={prediction?.predicted_home_score ?? ''}
+                          disabled={fieldsDisabled || deadlineHasPassed}
+                          onChange={(e) =>
+                            updatePrediction(
+                              match.id,
+                              'predicted_home_score',
+                              e.target.value
+                            )
+                          }
+                        />
+
+                        <span>-</span>
+
+                        <input
+                          className="input"
+                          type="number"
+                          min="0"
+                          placeholder={match.away_team}
+                          value={prediction?.predicted_away_score ?? ''}
+                          disabled={fieldsDisabled || deadlineHasPassed}
+                          onChange={(e) =>
+                            updatePrediction(
+                              match.id,
+                              'predicted_away_score',
+                              e.target.value
+                            )
+                          }
+                        />
+                      </div>
                     </div>
-                  </>
-                ) : (
-                  <div>Escolhe um palpite para veres a odd.</div>
+                  </div>
+
+                  {prediction?.pick && (
+                    <div className="odds-box">
+                      <p>
+                        Escolha: <strong>{selectedPickLabel}</strong>
+                      </p>
+
+                      <div className="odds-line">
+                        <span className="odd-pill">
+                          Odd: {selectedOdd.toFixed(2)}
+                        </span>
+
+                        <span className="odd-pill exact">
+                          Odd com resultado correto:{' '}
+                          {(selectedOdd * 2).toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {isEditing && (
+              <div className="sticky-submit">
+                <button
+                  className="button"
+                  onClick={submitPredictions}
+                  disabled={submitDisabled}
+                >
+                  {alreadySubmitted ? 'Guardar alterações' : 'Submeter palpites'}
+                </button>
+
+                {deadlineHasPassed && (
+                  <p>O prazo desta jornada já fechou.</p>
+                )}
+
+                {!deadlineHasPassed && submitDisabled && (
+                  <p>
+                    Preenche todos os jogos para poderes submeter. Faltam{' '}
+                    <strong>{remainingGames}</strong>.
+                  </p>
                 )}
               </div>
-            </div>
-          );
-        })}
-
-        {matches.length > 0 && (!alreadySubmitted || isEditing) && (
-          <button className="button" onClick={submitPredictions}>
-            {alreadySubmitted ? 'Guardar alterações' : 'Submeter palpites desta jornada'}
-          </button>
+            )}
+          </>
         )}
-
-        {message && <div className="message">{message}</div>}
-        {success && <div className="success-message">{success}</div>}
       </main>
     </div>
   );

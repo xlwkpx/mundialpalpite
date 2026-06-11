@@ -29,9 +29,7 @@ export default function NavBar() {
       .eq('id', session.user.id)
       .single();
 
-    if (data) {
-      setProfile(data);
-    }
+    if (data) setProfile(data);
   }
 
   async function logout() {
@@ -48,7 +46,7 @@ export default function NavBar() {
 
         <nav className="nav-links">
           <Link className="nav-link" href="/player">
-            Jogos da próxima jornada
+            Jogos
           </Link>
 
           <Link className="nav-link" href="/bets">
@@ -56,10 +54,14 @@ export default function NavBar() {
           </Link>
 
           <Link className="nav-link" href="/leaderboard">
-            Tabelas Classificativas
+            Classificação
           </Link>
 
-                    <Link className="nav-link" href="/rules">
+          <Link className="nav-link" href="/statistics">
+            Estatísticas
+          </Link>
+
+          <Link className="nav-link" href="/rules">
             Regras
           </Link>
 

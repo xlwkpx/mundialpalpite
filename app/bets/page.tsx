@@ -77,7 +77,6 @@ export default function BetsPage() {
     }
 
     const typedRows = (data || []) as VisibleBet[];
-
     setRows(typedRows);
 
     const uniqueDeadlines = Array.from(
@@ -181,6 +180,10 @@ export default function BetsPage() {
     (round) => round.deadline === selectedDeadline
   );
 
+  const selectedRoundClosed =
+    selectedMatches.length > 0 &&
+    selectedMatches.every((match) => match.is_revealed);
+
   function getPickLabel(match: Match, pick: string | null) {
     if (pick === 'home') return `Vitória ${match.home_team}`;
     if (pick === 'draw') return 'Empate';
@@ -194,17 +197,17 @@ export default function BetsPage() {
     );
   }
 
+  function playerHasFullRoundBet(userId: string) {
+    if (selectedMatches.length === 0) return false;
+
+    return selectedMatches.every((match) => {
+      const bet = getBet(userId, match.id);
+      return bet?.has_bet;
+    });
+  }
+
   function getShortStatusForPlayer(userId: string) {
-    const playerBets = selectedMatches.map((match) =>
-      getBet(userId, match.id)
-    );
-
-    const hasAll = playerBets.every((bet) => bet?.has_bet);
-    const selectedRoundClosed = selectedMatches.every(
-      (match) => match.is_revealed
-    );
-
-    if (hasAll) return 'Apostou';
+    if (playerHasFullRoundBet(userId)) return 'Apostou';
 
     if (selectedRoundClosed) {
       return 'Não apostou';
@@ -214,10 +217,6 @@ export default function BetsPage() {
   }
 
   function getRoundPoints(userId: string) {
-    const selectedRoundClosed = selectedMatches.every(
-      (match) => match.is_revealed
-    );
-
     if (!selectedRoundClosed) {
       return null;
     }
@@ -228,6 +227,12 @@ export default function BetsPage() {
     }, 0);
   }
 
+  const playersWhoBet = profiles.filter((profile) =>
+    playerHasFullRoundBet(profile.id)
+  ).length;
+
+  const totalPlayers = profiles.length;
+
   const sortedProfilesForSummary = useMemo(() => {
     return [...profiles].sort((a, b) => {
       const pointsA = getRoundPoints(a.id);
@@ -237,13 +242,16 @@ export default function BetsPage() {
         return pointsB - pointsA;
       }
 
+      const aHasBet = playerHasFullRoundBet(a.id);
+      const bHasBet = playerHasFullRoundBet(b.id);
+
+      if (aHasBet !== bHasBet) {
+        return aHasBet ? -1 : 1;
+      }
+
       return a.name.localeCompare(b.name);
     });
   }, [profiles, rows, selectedDeadline, matches]);
-
-  const selectedRoundClosed =
-    selectedMatches.length > 0 &&
-    selectedMatches.every((match) => match.is_revealed);
 
   return (
     <div className="page">
@@ -275,9 +283,24 @@ export default function BetsPage() {
           </select>
 
           {selectedRound && (
-            <p className="card-info" style={{ marginTop: 10 }}>
-              A ver: <strong>Jornada {selectedRound.number}</strong>
-            </p>
+            <div className="round-info-grid">
+              <div className="round-info-card">
+                <span>Jornada</span>
+                <strong>{selectedRound.number}</strong>
+              </div>
+
+              <div className="round-info-card">
+                <span>Apostas feitas</span>
+                <strong>
+                  {playersWhoBet}/{totalPlayers}
+                </strong>
+              </div>
+
+              <div className="round-info-card">
+                <span>Fecha em</span>
+                <strong>{new Date(selectedDeadline).toLocaleString('pt-PT')}</strong>
+              </div>
+            </div>
           )}
 
           {selectedMatches.length > 0 && !selectedRoundClosed && (
@@ -291,6 +314,10 @@ export default function BetsPage() {
               Prazo fechado. Palpites revelados.
             </div>
           )}
+
+          <button className="button secondary" style={{ marginTop: 12 }} onClick={load}>
+            Atualizar
+          </button>
         </div>
 
         {selectedMatches.length === 0 && (
@@ -336,16 +363,17 @@ export default function BetsPage() {
                 <tbody>
                   {profiles.map((profile) => {
                     const bet = getBet(profile.id, match.id);
+                    const rowClass = bet?.has_bet ? 'bet-row-done' : 'bet-row-pending';
 
                     return (
-                      <tr key={`${profile.id}-${match.id}`}>
+                      <tr key={`${profile.id}-${match.id}`} className={rowClass}>
                         <td>{profile.name}</td>
 
                         <td>
                           {bet?.has_bet ? (
-                            <span className="status-pill">Apostado</span>
+                            <span className="status-pill status-success">Apostado</span>
                           ) : (
-                            <span className="status-pill">
+                            <span className="status-pill status-warning">
                               {getShortStatusForPlayer(profile.id)}
                             </span>
                           )}
@@ -407,6 +435,15 @@ export default function BetsPage() {
           <div className="card">
             <h2>Resumo da jornada</h2>
 
+            <p className="card-info">
+              <strong>{playersWhoBet}/{totalPlayers}</strong> jogadores já apostaram nesta jornada.
+            </p>
+
+            <p className="card-info">
+              A jornada fecha em:{' '}
+              <strong>{new Date(selectedDeadline).toLocaleString('pt-PT')}</strong>
+            </p>
+
             <div className="table-wrapper">
               <table>
                 <thead>
@@ -421,13 +458,23 @@ export default function BetsPage() {
                 <tbody>
                   {sortedProfilesForSummary.map((profile, index) => {
                     const roundPoints = getRoundPoints(profile.id);
+                    const hasBet = playerHasFullRoundBet(profile.id);
 
                     return (
-                      <tr key={profile.id}>
+                      <tr
+                        key={profile.id}
+                        className={hasBet ? 'bet-row-done' : 'bet-row-pending'}
+                      >
                         <td>{index + 1}</td>
                         <td>{profile.name}</td>
                         <td>
-                          <span className="status-pill">
+                          <span
+                            className={
+                              hasBet
+                                ? 'status-pill status-success'
+                                : 'status-pill status-warning'
+                            }
+                          >
                             {getShortStatusForPlayer(profile.id)}
                           </span>
                         </td>
