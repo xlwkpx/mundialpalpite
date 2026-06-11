@@ -4,6 +4,26 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import NavBar from '@/app/components/NavBar';
 
+type VisibleBet = {
+  match_id: string;
+  match_date: string;
+  deadline: string;
+  home_team: string;
+  away_team: string;
+  home_score: number | null;
+  away_score: number | null;
+  status: string;
+  profile_id: string;
+  player_name: string;
+  player_role: string;
+  has_bet: boolean;
+  is_revealed: boolean;
+  pick: string | null;
+  predicted_home_score: number | null;
+  predicted_away_score: number | null;
+  points: number | null;
+};
+
 type Match = {
   id: string;
   match_date: string;
@@ -13,22 +33,13 @@ type Match = {
   home_score: number | null;
   away_score: number | null;
   status: string;
+  is_revealed: boolean;
 };
 
 type Profile = {
   id: string;
   name: string;
   role: string;
-};
-
-type Prediction = {
-  id: string;
-  user_id: string;
-  match_id: string;
-  pick: string;
-  predicted_home_score: number;
-  predicted_away_score: number;
-  points: number | null;
 };
 
 type Round = {
@@ -38,9 +49,7 @@ type Round = {
 };
 
 export default function BetsPage() {
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [predictions, setPredictions] = useState<Prediction[]>([]);
+  const [rows, setRows] = useState<VisibleBet[]>([]);
   const [selectedDeadline, setSelectedDeadline] = useState('');
   const [message, setMessage] = useState('');
 
@@ -60,53 +69,80 @@ export default function BetsPage() {
       return;
     }
 
-    const { data: matchesData, error: matchesError } = await supabase
-      .from('matches')
-      .select('id, match_date, home_team, away_team, deadline, home_score, away_score, status')
-      .order('deadline', { ascending: true })
-      .order('match_date', { ascending: true });
+    const { data, error } = await supabase.rpc('get_visible_bets');
 
-    if (matchesError) {
-      setMessage(`Erro a carregar jornadas: ${matchesError.message}`);
+    if (error) {
+      setMessage(`Erro a carregar apostas: ${error.message}`);
       return;
     }
 
-    const { data: profilesData, error: profilesError } = await supabase
-      .from('profiles')
-      .select('id, name, role')
-      .order('name', { ascending: true });
+    const typedRows = (data || []) as VisibleBet[];
 
-    if (profilesError) {
-      setMessage(`Erro a carregar jogadores: ${profilesError.message}`);
-      return;
-    }
+    setRows(typedRows);
 
-    const { data: predictionsData, error: predictionsError } = await supabase
-      .from('predictions')
-      .select('id, user_id, match_id, pick, predicted_home_score, predicted_away_score, points');
+    const uniqueDeadlines = Array.from(
+      new Set(typedRows.map((row) => row.deadline))
+    ).sort();
 
-    if (predictionsError) {
-      setMessage(`Erro a carregar apostas: ${predictionsError.message}`);
-      return;
-    }
-
-    const typedMatches = (matchesData || []) as Match[];
-
-    setMatches(typedMatches);
-    setProfiles((profilesData || []) as Profile[]);
-    setPredictions((predictionsData || []) as Prediction[]);
-
-    if (typedMatches.length > 0) {
+    if (uniqueDeadlines.length > 0) {
       const now = new Date().toISOString();
-      const nextOpenMatch = typedMatches.find((match) => match.deadline > now);
+      const nextOpenDeadline = uniqueDeadlines.find(
+        (deadline) => deadline > now
+      );
 
-      if (nextOpenMatch) {
-        setSelectedDeadline(nextOpenMatch.deadline);
+      if (nextOpenDeadline) {
+        setSelectedDeadline(nextOpenDeadline);
       } else {
-        setSelectedDeadline(typedMatches[typedMatches.length - 1].deadline);
+        setSelectedDeadline(uniqueDeadlines[uniqueDeadlines.length - 1]);
       }
     }
   }
+
+  const matches: Match[] = useMemo(() => {
+    const map = new Map<string, Match>();
+
+    rows.forEach((row) => {
+      if (!map.has(row.match_id)) {
+        map.set(row.match_id, {
+          id: row.match_id,
+          match_date: row.match_date,
+          home_team: row.home_team,
+          away_team: row.away_team,
+          deadline: row.deadline,
+          home_score: row.home_score,
+          away_score: row.away_score,
+          status: row.status,
+          is_revealed: row.is_revealed,
+        });
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.deadline !== b.deadline) {
+        return a.deadline.localeCompare(b.deadline);
+      }
+
+      return a.match_date.localeCompare(b.match_date);
+    });
+  }, [rows]);
+
+  const profiles: Profile[] = useMemo(() => {
+    const map = new Map<string, Profile>();
+
+    rows.forEach((row) => {
+      if (!map.has(row.profile_id)) {
+        map.set(row.profile_id, {
+          id: row.profile_id,
+          name: row.player_name,
+          role: row.player_role,
+        });
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+  }, [rows]);
 
   const rounds: Round[] = useMemo(() => {
     const uniqueDeadlines = Array.from(
@@ -114,8 +150,13 @@ export default function BetsPage() {
     );
 
     return uniqueDeadlines.map((deadline, index) => {
-      const roundMatches = matches.filter((match) => match.deadline === deadline);
-      const dates = Array.from(new Set(roundMatches.map((match) => match.match_date)));
+      const roundMatches = matches.filter(
+        (match) => match.deadline === deadline
+      );
+
+      const dates = Array.from(
+        new Set(roundMatches.map((match) => match.match_date))
+      );
 
       const dayText =
         dates.length === 1
@@ -125,7 +166,9 @@ export default function BetsPage() {
       return {
         deadline,
         number: index + 1,
-        label: `Jornada ${index + 1} — ${dayText} — prazo ${new Date(deadline).toLocaleString('pt-PT')}`,
+        label: `Jornada ${index + 1} — ${dayText} — prazo ${new Date(
+          deadline
+        ).toLocaleString('pt-PT')}`,
       };
     });
   }, [matches]);
@@ -134,35 +177,36 @@ export default function BetsPage() {
     (match) => match.deadline === selectedDeadline
   );
 
-  const selectedRound = rounds.find((round) => round.deadline === selectedDeadline);
+  const selectedRound = rounds.find(
+    (round) => round.deadline === selectedDeadline
+  );
 
-  function getPickLabel(match: Match, pick: string) {
+  function getPickLabel(match: Match, pick: string | null) {
     if (pick === 'home') return `Vitória ${match.home_team}`;
     if (pick === 'draw') return 'Empate';
     if (pick === 'away') return `Vitória ${match.away_team}`;
     return '-';
   }
 
-  function getPrediction(userId: string, matchId: string) {
-    return predictions.find(
-      (prediction) =>
-        prediction.user_id === userId && prediction.match_id === matchId
+  function getBet(userId: string, matchId: string) {
+    return rows.find(
+      (row) => row.profile_id === userId && row.match_id === matchId
     );
   }
 
   function getShortStatusForPlayer(userId: string) {
-    const now = new Date();
-    const deadline = selectedDeadline ? new Date(selectedDeadline) : null;
-
-    const playerPredictions = selectedMatches.map((match) =>
-      getPrediction(userId, match.id)
+    const playerBets = selectedMatches.map((match) =>
+      getBet(userId, match.id)
     );
 
-    const hasAll = playerPredictions.every(Boolean);
+    const hasAll = playerBets.every((bet) => bet?.has_bet);
+    const selectedRoundClosed = selectedMatches.every(
+      (match) => match.is_revealed
+    );
 
     if (hasAll) return 'Apostou';
 
-    if (deadline && now > deadline) {
+    if (selectedRoundClosed) {
       return 'Não apostou';
     }
 
@@ -170,9 +214,17 @@ export default function BetsPage() {
   }
 
   function getRoundPoints(userId: string) {
+    const selectedRoundClosed = selectedMatches.every(
+      (match) => match.is_revealed
+    );
+
+    if (!selectedRoundClosed) {
+      return null;
+    }
+
     return selectedMatches.reduce((sum, match) => {
-      const prediction = getPrediction(userId, match.id);
-      return sum + Number(prediction?.points || 0);
+      const bet = getBet(userId, match.id);
+      return sum + Number(bet?.points || 0);
     }, 0);
   }
 
@@ -181,13 +233,17 @@ export default function BetsPage() {
       const pointsA = getRoundPoints(a.id);
       const pointsB = getRoundPoints(b.id);
 
-      if (pointsB !== pointsA) {
+      if (pointsA !== null && pointsB !== null && pointsB !== pointsA) {
         return pointsB - pointsA;
       }
 
       return a.name.localeCompare(b.name);
     });
-  }, [profiles, predictions, selectedDeadline, matches]);
+  }, [profiles, rows, selectedDeadline, matches]);
+
+  const selectedRoundClosed =
+    selectedMatches.length > 0 &&
+    selectedMatches.every((match) => match.is_revealed);
 
   return (
     <div className="page">
@@ -197,7 +253,8 @@ export default function BetsPage() {
         <h1 className="page-title">Apostas</h1>
 
         <p className="page-subtitle">
-          Consulta as apostas feitas pelos jogadores na jornada selecionada.
+          Consulta quem já apostou na jornada selecionada. Os palpites ficam
+          ocultos até ao prazo da aposta fechar.
         </p>
 
         {message && <div className="message">{message}</div>}
@@ -222,6 +279,18 @@ export default function BetsPage() {
               A ver: <strong>Jornada {selectedRound.number}</strong>
             </p>
           )}
+
+          {selectedMatches.length > 0 && !selectedRoundClosed && (
+            <div className="prediction-status" style={{ marginTop: 14 }}>
+              Palpites ocultos até ao prazo da aposta fechar.
+            </div>
+          )}
+
+          {selectedMatches.length > 0 && selectedRoundClosed && (
+            <div className="success-message" style={{ marginTop: 14 }}>
+              Prazo fechado. Palpites revelados.
+            </div>
+          )}
         </div>
 
         {selectedMatches.length === 0 && (
@@ -238,9 +307,17 @@ export default function BetsPage() {
               Estado: {match.status === 'final' ? 'Finalizado' : 'Aberto'}
             </p>
 
+            <p className="card-info">
+              Prazo da aposta:{' '}
+              <strong>{new Date(match.deadline).toLocaleString('pt-PT')}</strong>
+            </p>
+
             {match.home_score !== null && match.away_score !== null && (
               <p className="card-info">
-                Resultado: <strong>{match.home_score} - {match.away_score}</strong>
+                Resultado:{' '}
+                <strong>
+                  {match.home_score} - {match.away_score}
+                </strong>
               </p>
             )}
 
@@ -249,6 +326,7 @@ export default function BetsPage() {
                 <thead>
                   <tr>
                     <th>Jogador</th>
+                    <th>Estado</th>
                     <th>Palpite</th>
                     <th>Resultado exato</th>
                     <th>Pontos no jogo</th>
@@ -257,28 +335,65 @@ export default function BetsPage() {
 
                 <tbody>
                   {profiles.map((profile) => {
-                    const prediction = getPrediction(profile.id, match.id);
+                    const bet = getBet(profile.id, match.id);
 
                     return (
                       <tr key={`${profile.id}-${match.id}`}>
                         <td>{profile.name}</td>
 
-                        {prediction ? (
-                          <>
-                            <td>{getPickLabel(match, prediction.pick)}</td>
-                            <td>
-                              {prediction.predicted_home_score} -{' '}
-                              {prediction.predicted_away_score}
-                            </td>
-                            <td>{Number(prediction.points || 0).toFixed(2)}</td>
-                          </>
-                        ) : (
-                          <td colSpan={3}>
+                        <td>
+                          {bet?.has_bet ? (
+                            <span className="status-pill">Apostado</span>
+                          ) : (
                             <span className="status-pill">
                               {getShortStatusForPlayer(profile.id)}
                             </span>
-                          </td>
-                        )}
+                          )}
+                        </td>
+
+                        <td>
+                          {!bet?.has_bet && '-'}
+
+                          {bet?.has_bet && !bet.is_revealed && (
+                            <span className="hidden-bet">
+                              Oculto até ao prazo da aposta
+                            </span>
+                          )}
+
+                          {bet?.has_bet && bet.is_revealed && (
+                            <strong>{getPickLabel(match, bet.pick)}</strong>
+                          )}
+                        </td>
+
+                        <td>
+                          {!bet?.has_bet && '-'}
+
+                          {bet?.has_bet && !bet.is_revealed && (
+                            <span className="hidden-bet">Oculto</span>
+                          )}
+
+                          {bet?.has_bet &&
+                            bet.is_revealed &&
+                            bet.predicted_home_score !== null &&
+                            bet.predicted_away_score !== null && (
+                              <strong>
+                                {bet.predicted_home_score} -{' '}
+                                {bet.predicted_away_score}
+                              </strong>
+                            )}
+                        </td>
+
+                        <td>
+                          {!bet?.has_bet && '-'}
+
+                          {bet?.has_bet && !bet.is_revealed && (
+                            <span className="hidden-bet">Oculto</span>
+                          )}
+
+                          {bet?.has_bet && bet.is_revealed && (
+                            <strong>{Number(bet.points || 0).toFixed(2)}</strong>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -304,18 +419,28 @@ export default function BetsPage() {
                 </thead>
 
                 <tbody>
-                  {sortedProfilesForSummary.map((profile, index) => (
-                    <tr key={profile.id}>
-                      <td>{index + 1}</td>
-                      <td>{profile.name}</td>
-                      <td>
-                        <span className="status-pill">
-                          {getShortStatusForPlayer(profile.id)}
-                        </span>
-                      </td>
-                      <td>{getRoundPoints(profile.id).toFixed(2)}</td>
-                    </tr>
-                  ))}
+                  {sortedProfilesForSummary.map((profile, index) => {
+                    const roundPoints = getRoundPoints(profile.id);
+
+                    return (
+                      <tr key={profile.id}>
+                        <td>{index + 1}</td>
+                        <td>{profile.name}</td>
+                        <td>
+                          <span className="status-pill">
+                            {getShortStatusForPlayer(profile.id)}
+                          </span>
+                        </td>
+                        <td>
+                          {roundPoints === null ? (
+                            <span className="hidden-bet">Oculto</span>
+                          ) : (
+                            roundPoints.toFixed(2)
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

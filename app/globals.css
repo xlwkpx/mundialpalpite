@@ -536,6 +536,16 @@ select.select {
   margin: 6px 0;
 }
 
+.hidden-bet {
+  display: inline-block;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #6b7280;
+  font-weight: 700;
+  font-size: 13px;
+}
+
 }
 
 }
