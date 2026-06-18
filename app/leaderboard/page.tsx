@@ -86,7 +86,6 @@ export default function LeaderboardPage() {
                 <tr>
                   <th>Posição</th>
                   <th>Jogador</th>
-                  <th>Tipo</th>
                   <th>Pontos</th>
                 </tr>
               </thead>
@@ -108,12 +107,6 @@ export default function LeaderboardPage() {
 
                     <td>
                       <strong>{row.name}</strong>
-                    </td>
-
-                    <td>
-                      <span className="status-pill">
-                        {row.role === 'admin' ? 'Admin' : 'Jogador'}
-                      </span>
                     </td>
 
                     <td>

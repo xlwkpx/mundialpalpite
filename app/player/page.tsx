@@ -272,7 +272,7 @@ export default function PlayerPage() {
 
   const exactPotential = useMemo(() => {
     return matches.reduce((sum, match) => {
-      return sum + getSelectedOdd(match) * 2;
+      return (matches.length)*2 + normalPotential;
     }, 0);
   }, [matches, predictions]);
 
@@ -555,7 +555,7 @@ export default function PlayerPage() {
 
                         <span className="odd-pill exact">
                           Odd com resultado correto:{' '}
-                          {(selectedOdd * 2).toFixed(2)}
+                          {(selectedOdd + 2).toFixed(2)}
                         </span>
                       </div>
                     </div>

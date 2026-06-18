@@ -7,6 +7,7 @@ import NavBar from '@/app/components/NavBar';
 type VisibleBet = {
   match_id: string;
   match_date: string;
+  kickoff_at: string | null;
   deadline: string;
   home_team: string;
   away_team: string;
@@ -27,6 +28,7 @@ type VisibleBet = {
 type Match = {
   id: string;
   match_date: string;
+  kickoff_at: string | null;
   home_team: string;
   away_team: string;
   deadline: string;
@@ -47,6 +49,65 @@ type Round = {
   label: string;
   number: number;
 };
+
+function getPortugalTodayDateString() {
+  const parts = new Intl.DateTimeFormat('pt-PT', {
+    timeZone: 'Europe/Lisbon',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+
+  const day = parts.find((part) => part.type === 'day')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const year = parts.find((part) => part.type === 'year')?.value;
+
+  return `${year}-${month}-${day}`;
+}
+
+function formatPortugalDate(value: string | null) {
+  if (!value) return 'Data por definir';
+
+  return new Intl.DateTimeFormat('pt-PT', {
+    timeZone: 'Europe/Lisbon',
+    dateStyle: 'short',
+  }).format(new Date(value));
+}
+
+function formatPortugalDateTime(value: string | null) {
+  if (!value) return 'Data/hora por definir';
+
+  return new Intl.DateTimeFormat('pt-PT', {
+    timeZone: 'Europe/Lisbon',
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(new Date(value));
+}
+
+function formatPortugalTime(value: string | null) {
+  if (!value) return 'Hora por definir';
+
+  return new Intl.DateTimeFormat('pt-PT', {
+    timeZone: 'Europe/Lisbon',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
+function sortMatchesByKickoff(a: Match, b: Match) {
+  if (a.kickoff_at && b.kickoff_at) {
+    return new Date(a.kickoff_at).getTime() - new Date(b.kickoff_at).getTime();
+  }
+
+  if (a.kickoff_at && !b.kickoff_at) return -1;
+  if (!a.kickoff_at && b.kickoff_at) return 1;
+
+  if (a.match_date !== b.match_date) {
+    return a.match_date.localeCompare(b.match_date);
+  }
+
+  return a.home_team.localeCompare(b.home_team);
+}
 
 export default function BetsPage() {
   const [rows, setRows] = useState<VisibleBet[]>([]);
@@ -84,7 +145,19 @@ export default function BetsPage() {
     ).sort();
 
     if (uniqueDeadlines.length > 0) {
+      const todayPortugal = getPortugalTodayDateString();
+
+      const todayRows = typedRows.filter(
+        (row) => row.match_date === todayPortugal
+      );
+
+      if (todayRows.length > 0) {
+        setSelectedDeadline(todayRows[0].deadline);
+        return;
+      }
+
       const now = new Date().toISOString();
+
       const nextOpenDeadline = uniqueDeadlines.find(
         (deadline) => deadline > now
       );
@@ -105,6 +178,7 @@ export default function BetsPage() {
         map.set(row.match_id, {
           id: row.match_id,
           match_date: row.match_date,
+          kickoff_at: row.kickoff_at,
           home_team: row.home_team,
           away_team: row.away_team,
           deadline: row.deadline,
@@ -121,7 +195,7 @@ export default function BetsPage() {
         return a.deadline.localeCompare(b.deadline);
       }
 
-      return a.match_date.localeCompare(b.match_date);
+      return sortMatchesByKickoff(a, b);
     });
   }, [rows]);
 
@@ -149,9 +223,9 @@ export default function BetsPage() {
     );
 
     return uniqueDeadlines.map((deadline, index) => {
-      const roundMatches = matches.filter(
-        (match) => match.deadline === deadline
-      );
+      const roundMatches = matches
+        .filter((match) => match.deadline === deadline)
+        .sort(sortMatchesByKickoff);
 
       const dates = Array.from(
         new Set(roundMatches.map((match) => match.match_date))
@@ -159,22 +233,29 @@ export default function BetsPage() {
 
       const dayText =
         dates.length === 1
-          ? `jogos dia ${dates[0]}`
-          : `jogos dias ${dates[0]} a ${dates[dates.length - 1]}`;
+          ? `dia ${formatPortugalDate(
+              roundMatches[0]?.kickoff_at || `${dates[0]}T12:00:00`
+            )}`
+          : `dias ${formatPortugalDate(
+              roundMatches[0]?.kickoff_at || `${dates[0]}T12:00:00`
+            )} a ${formatPortugalDate(
+              roundMatches[roundMatches.length - 1]?.kickoff_at ||
+                `${dates[dates.length - 1]}T12:00:00`
+            )}`;
 
       return {
         deadline,
         number: index + 1,
-        label: `Jornada ${index + 1} — ${dayText} — prazo ${new Date(
-          deadline
-        ).toLocaleString('pt-PT')}`,
+        label: `Jornada ${index + 1} — ${dayText}`,
       };
     });
   }, [matches]);
 
-  const selectedMatches = matches.filter(
-    (match) => match.deadline === selectedDeadline
-  );
+  const selectedMatches = useMemo(() => {
+    return matches
+      .filter((match) => match.deadline === selectedDeadline)
+      .sort(sortMatchesByKickoff);
+  }, [matches, selectedDeadline]);
 
   const selectedRound = rounds.find(
     (round) => round.deadline === selectedDeadline
@@ -298,7 +379,7 @@ export default function BetsPage() {
 
               <div className="round-info-card">
                 <span>Fecha em</span>
-                <strong>{new Date(selectedDeadline).toLocaleString('pt-PT')}</strong>
+                <strong>{formatPortugalDateTime(selectedDeadline)}</strong>
               </div>
             </div>
           )}
@@ -327,17 +408,15 @@ export default function BetsPage() {
         {selectedMatches.map((match) => (
           <div className="card" key={match.id}>
             <h3>
-              {match.match_date} — {match.home_team} vs {match.away_team}
+              {formatPortugalTime(match.kickoff_at)} — {match.home_team} vs {match.away_team}
             </h3>
+
 
             <p className="card-info">
               Estado: {match.status === 'final' ? 'Finalizado' : 'Aberto'}
             </p>
 
-            <p className="card-info">
-              Prazo da aposta:{' '}
-              <strong>{new Date(match.deadline).toLocaleString('pt-PT')}</strong>
-            </p>
+            
 
             {match.home_score !== null && match.away_score !== null && (
               <p className="card-info">
@@ -441,7 +520,7 @@ export default function BetsPage() {
 
             <p className="card-info">
               A jornada fecha em:{' '}
-              <strong>{new Date(selectedDeadline).toLocaleString('pt-PT')}</strong>
+              <strong>{formatPortugalDateTime(selectedDeadline)}</strong>
             </p>
 
             <div className="table-wrapper">
