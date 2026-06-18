@@ -80,11 +80,17 @@ export default function LeaderboardPage() {
         {message && <div className="message">{message}</div>}
 
         <div className="card">
-          <div className="table-wrapper">
+          <div className="table-wrapper leaderboard-wrapper">
             <table className="leaderboard-table">
+              <colgroup>
+                <col className="leaderboard-col-position" />
+                <col className="leaderboard-col-player" />
+                <col className="leaderboard-col-points" />
+              </colgroup>
+
               <thead>
                 <tr>
-                  <th>Posição</th>
+                  <th>#</th>
                   <th>Jogador</th>
                   <th>Pontos</th>
                 </tr>
@@ -97,7 +103,7 @@ export default function LeaderboardPage() {
                     className={getRowClass(index, rows.length)}
                   >
                     <td>
-                      <span className="position-cell">
+                      <span className="position-cell leaderboard-position-cell">
                         <span>{index + 1}</span>
                         {getMedal(index) && (
                           <span className="medal">{getMedal(index)}</span>
@@ -106,11 +112,15 @@ export default function LeaderboardPage() {
                     </td>
 
                     <td>
-                      <strong>{row.name}</strong>
+                      <strong className="leaderboard-player-name">
+                        {row.name}
+                      </strong>
                     </td>
 
                     <td>
-                      <strong>{Number(row.total_points || 0).toFixed(2)}</strong>
+                      <strong className="leaderboard-points">
+                        {Number(row.total_points || 0).toFixed(2)}
+                      </strong>
                     </td>
                   </tr>
                 ))}

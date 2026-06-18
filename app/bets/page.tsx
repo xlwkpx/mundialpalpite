@@ -50,6 +50,8 @@ type Round = {
   number: number;
 };
 
+type PlayerStatus = 'done' | 'pending' | 'missed';
+
 function getPortugalTodayDateString() {
   const parts = new Intl.DateTimeFormat('pt-PT', {
     timeZone: 'Europe/Lisbon',
@@ -265,10 +267,18 @@ export default function BetsPage() {
     selectedMatches.length > 0 &&
     selectedMatches.every((match) => match.is_revealed);
 
+  function getDeadlineText() {
+    if (selectedRoundClosed) {
+      return 'Apostas fechadas';
+    }
+
+    return formatPortugalDateTime(selectedDeadline);
+  }
+
   function getPickLabel(match: Match, pick: string | null) {
-    if (pick === 'home') return `Vitória ${match.home_team}`;
+    if (pick === 'home') return match.home_team;
     if (pick === 'draw') return 'Empate';
-    if (pick === 'away') return `Vitória ${match.away_team}`;
+    if (pick === 'away') return match.away_team;
     return '-';
   }
 
@@ -287,14 +297,40 @@ export default function BetsPage() {
     });
   }
 
-  function getShortStatusForPlayer(userId: string) {
-    if (playerHasFullRoundBet(userId)) return 'Apostou';
+  function getPlayerStatus(userId: string, matchId?: string): PlayerStatus {
+    if (matchId) {
+      const bet = getBet(userId, matchId);
 
-    if (selectedRoundClosed) {
-      return 'Não apostou';
+      if (bet?.has_bet) return 'done';
+      if (selectedRoundClosed) return 'missed';
+      return 'pending';
     }
 
+    if (playerHasFullRoundBet(userId)) return 'done';
+    if (selectedRoundClosed) return 'missed';
+    return 'pending';
+  }
+
+  function getStatusLabel(status: PlayerStatus) {
+    if (status === 'done') return 'Apostou';
+    if (status === 'missed') return 'Não apostou';
     return 'Por apostar';
+  }
+
+  function getStatusSymbol(status: PlayerStatus) {
+    if (status === 'done') return '✓';
+    if (status === 'missed') return '×';
+    return '!';
+  }
+
+  function getStatusClass(status: PlayerStatus) {
+    if (status === 'done') return 'status-dot done';
+    if (status === 'missed') return 'status-dot missed';
+    return 'status-dot pending';
+  }
+
+  function getShortStatusForPlayer(userId: string) {
+    return getStatusLabel(getPlayerStatus(userId));
   }
 
   function getRoundPoints(userId: string) {
@@ -342,13 +378,13 @@ export default function BetsPage() {
         <h1 className="page-title">Apostas</h1>
 
         <p className="page-subtitle">
-          Consulta quem já apostou na jornada selecionada. Os palpites ficam
-          ocultos até ao prazo da aposta fechar.
+          Consulta quem já apostou. Os palpites ficam ocultos até ao prazo da
+          aposta fechar.
         </p>
 
         {message && <div className="message">{message}</div>}
 
-        <div className="card">
+        <div className="card bets-filter-card">
           <label>Selecionar jornada</label>
 
           <select
@@ -364,25 +400,29 @@ export default function BetsPage() {
           </select>
 
           {selectedRound && (
-            <div className="round-info-grid">
-              <div className="round-info-card">
-                <span>Jornada</span>
-                <strong>{selectedRound.number}</strong>
-              </div>
-
-              <div className="round-info-card">
-                <span>Apostas feitas</span>
-                <strong>
-                  {playersWhoBet}/{totalPlayers}
-                </strong>
-              </div>
-
-              <div className="round-info-card">
-                <span>Fecha em</span>
-                <strong>{formatPortugalDateTime(selectedDeadline)}</strong>
-              </div>
+            <div className="bets-compact-summary">
+              <strong>
+                {playersWhoBet}/{totalPlayers}
+              </strong>{' '}
+              jogadores já apostaram · Fecha:{' '}
+              <strong>{getDeadlineText()}</strong>
             </div>
           )}
+
+          <div className="bets-status-legend" aria-label="Legenda dos estados">
+            <span>
+              <span className="status-dot done">✓</span>
+              Apostou
+            </span>
+            <span>
+              <span className="status-dot pending">!</span>
+              Por apostar
+            </span>
+            <span>
+              <span className="status-dot missed">×</span>
+              Não apostou
+            </span>
+          </div>
 
           {selectedMatches.length > 0 && !selectedRoundClosed && (
             <div className="prediction-status" style={{ marginTop: 14 }}>
@@ -396,7 +436,11 @@ export default function BetsPage() {
             </div>
           )}
 
-          <button className="button secondary" style={{ marginTop: 12 }} onClick={load}>
+          <button
+            className="button secondary"
+            style={{ marginTop: 12 }}
+            onClick={load}
+          >
             Atualizar
           </button>
         </div>
@@ -408,15 +452,23 @@ export default function BetsPage() {
         {selectedMatches.map((match) => (
           <div className="card" key={match.id}>
             <h3>
-              {formatPortugalTime(match.kickoff_at)} — {match.home_team} vs {match.away_team}
+              {formatPortugalTime(match.kickoff_at)} — {match.home_team} vs{' '}
+              {match.away_team}
             </h3>
 
-
             <p className="card-info">
-              Estado: {match.status === 'final' ? 'Finalizado' : 'Aberto'}
+              Data do jogo:{' '}
+              <strong>
+                {match.kickoff_at
+                  ? formatPortugalDateTime(match.kickoff_at)
+                  : match.match_date}
+              </strong>
             </p>
 
-            
+            <p className="card-info">
+              Prazo da aposta:{' '}
+              <strong>{formatPortugalDateTime(match.deadline)}</strong>
+            </p>
 
             {match.home_score !== null && match.away_score !== null && (
               <p className="card-info">
@@ -427,44 +479,46 @@ export default function BetsPage() {
               </p>
             )}
 
-            <div className="table-wrapper">
+            <div className="table-wrapper mobile-bets-table">
               <table>
                 <thead>
                   <tr>
                     <th>Jogador</th>
-                    <th>Estado</th>
                     <th>Palpite</th>
-                    <th>Resultado exato</th>
-                    <th>Pontos no jogo</th>
+                    <th>Resultado</th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {profiles.map((profile) => {
                     const bet = getBet(profile.id, match.id);
-                    const rowClass = bet?.has_bet ? 'bet-row-done' : 'bet-row-pending';
+                    const status = getPlayerStatus(profile.id, match.id);
+                    const statusLabel = getStatusLabel(status);
+                    const rowClass =
+                      status === 'done' ? 'bet-row-done' : 'bet-row-pending';
 
                     return (
                       <tr key={`${profile.id}-${match.id}`} className={rowClass}>
-                        <td>{profile.name}</td>
-
                         <td>
-                          {bet?.has_bet ? (
-                            <span className="status-pill status-success">Apostado</span>
-                          ) : (
-                            <span className="status-pill status-warning">
-                              {getShortStatusForPlayer(profile.id)}
+                          <div className="player-status-cell">
+                            <span
+                              className={getStatusClass(status)}
+                              title={statusLabel}
+                              aria-label={statusLabel}
+                            >
+                              {getStatusSymbol(status)}
                             </span>
-                          )}
+                            <span className="player-name-compact">
+                              {profile.name}
+                            </span>
+                          </div>
                         </td>
 
                         <td>
                           {!bet?.has_bet && '-'}
 
                           {bet?.has_bet && !bet.is_revealed && (
-                            <span className="hidden-bet">
-                              Oculto até ao prazo da aposta
-                            </span>
+                            <span className="hidden-bet">Oculto</span>
                           )}
 
                           {bet?.has_bet && bet.is_revealed && (
@@ -489,18 +543,6 @@ export default function BetsPage() {
                               </strong>
                             )}
                         </td>
-
-                        <td>
-                          {!bet?.has_bet && '-'}
-
-                          {bet?.has_bet && !bet.is_revealed && (
-                            <span className="hidden-bet">Oculto</span>
-                          )}
-
-                          {bet?.has_bet && bet.is_revealed && (
-                            <strong>{Number(bet.points || 0).toFixed(2)}</strong>
-                          )}
-                        </td>
                       </tr>
                     );
                   })}
@@ -511,32 +553,35 @@ export default function BetsPage() {
         ))}
 
         {selectedMatches.length > 0 && (
-          <div className="card">
-            <h2>Resumo da jornada</h2>
+          <div className="card bets-round-summary-card">
+            <div className="bets-summary-header">
+              <div>
+                <h2>Resumo da jornada</h2>
+                <p>
+                  <strong>
+                    {playersWhoBet}/{totalPlayers}
+                  </strong>{' '}
+                  jogadores já apostaram · Fecha:{' '}
+                  <strong>{getDeadlineText()}</strong>
+                </p>
+              </div>
+            </div>
 
-            <p className="card-info">
-              <strong>{playersWhoBet}/{totalPlayers}</strong> jogadores já apostaram nesta jornada.
-            </p>
-
-            <p className="card-info">
-              A jornada fecha em:{' '}
-              <strong>{formatPortugalDateTime(selectedDeadline)}</strong>
-            </p>
-
-            <div className="table-wrapper">
+            <div className="table-wrapper mobile-summary-table">
               <table>
                 <thead>
                   <tr>
-                    <th>Posição</th>
+                    <th>#</th>
                     <th>Jogador</th>
-                    <th>Estado</th>
-                    <th>Pontos da jornada</th>
+                    <th>Pts</th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {sortedProfilesForSummary.map((profile, index) => {
                     const roundPoints = getRoundPoints(profile.id);
+                    const status = getPlayerStatus(profile.id);
+                    const statusLabel = getShortStatusForPlayer(profile.id);
                     const hasBet = playerHasFullRoundBet(profile.id);
 
                     return (
@@ -544,24 +589,34 @@ export default function BetsPage() {
                         key={profile.id}
                         className={hasBet ? 'bet-row-done' : 'bet-row-pending'}
                       >
-                        <td>{index + 1}</td>
-                        <td>{profile.name}</td>
                         <td>
-                          <span
-                            className={
-                              hasBet
-                                ? 'status-pill status-success'
-                                : 'status-pill status-warning'
-                            }
-                          >
-                            {getShortStatusForPlayer(profile.id)}
+                          <span className="summary-position-cell">
+                            {index + 1}
                           </span>
                         </td>
+
+                        <td>
+                          <div className="player-status-cell">
+                            <span
+                              className={getStatusClass(status)}
+                              title={statusLabel}
+                              aria-label={statusLabel}
+                            >
+                              {getStatusSymbol(status)}
+                            </span>
+                            <span className="player-name-compact">
+                              {profile.name}
+                            </span>
+                          </div>
+                        </td>
+
                         <td>
                           {roundPoints === null ? (
-                            <span className="hidden-bet">Oculto</span>
+                            <span className="hidden-bet summary-hidden-points">
+                              Oculto
+                            </span>
                           ) : (
-                            roundPoints.toFixed(2)
+                            <strong>{roundPoints.toFixed(2)}</strong>
                           )}
                         </td>
                       </tr>

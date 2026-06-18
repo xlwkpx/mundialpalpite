@@ -262,10 +262,6 @@ export default function AdminPage() {
       .sort(sortMatchesByKickoff);
   }, [matches, selectedDeadline]);
 
-  const selectedRound = rounds.find(
-    (round) => round.deadline === selectedDeadline
-  );
-
   function updateResult(matchId: string, field: keyof ResultInput, value: string) {
     setResults((prev) => ({
       ...prev,
@@ -503,24 +499,7 @@ export default function AdminPage() {
             ))}
           </select>
 
-          {selectedRound && (
-            <div className="round-info-grid">
-              <div className="round-info-card">
-                <span>Jornada</span>
-                <strong>{selectedRound.number}</strong>
-              </div>
 
-              <div className="round-info-card">
-                <span>Jogos</span>
-                <strong>{selectedMatches.length}</strong>
-              </div>
-
-              <div className="round-info-card">
-                <span>Prazo</span>
-                <strong>{formatPortugalDateTime(selectedDeadline)}</strong>
-              </div>
-            </div>
-          )}
         </div>
 
         {selectedMatches.map((match) => (
@@ -528,6 +507,8 @@ export default function AdminPage() {
             <h3>
               {formatPortugalTime(match.kickoff_at)} — {match.home_team} vs {match.away_team}
             </h3>
+
+
 
             <p className="card-info">
               Estado:{' '}
