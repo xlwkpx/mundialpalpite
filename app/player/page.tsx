@@ -251,6 +251,49 @@ export default function PlayerPage() {
     });
   }
 
+  function getPredictionResultError(match: Match) {
+    const prediction = predictions[match.id];
+
+    if (
+      !prediction ||
+      prediction.pick === '' ||
+      prediction.predicted_home_score === '' ||
+      prediction.predicted_away_score === ''
+    ) {
+      return '';
+    }
+
+    const homeScore = Number(prediction.predicted_home_score);
+    const awayScore = Number(prediction.predicted_away_score);
+
+    if (
+      !Number.isInteger(homeScore) ||
+      !Number.isInteger(awayScore) ||
+      homeScore < 0 ||
+      awayScore < 0
+    ) {
+      return 'O resultado exato só pode ter números inteiros positivos.';
+    }
+
+    if (prediction.pick === 'home' && homeScore <= awayScore) {
+      return `Escolheste vitória da equipa da casa, por isso o resultado exato tem de ter mais golos para essa mesma equipa.`;
+    }
+
+    if (prediction.pick === 'draw' && homeScore !== awayScore) {
+      return 'Escolheste empate, por isso o resultado exato tem de ter os mesmos golos para as duas equipas.';
+    }
+
+    if (prediction.pick === 'away' && awayScore <= homeScore) {
+      return `Escolheste vitória da equipa visitante, por isso o resultado exato tem de ter mais golos para essa mesma equipa.`;
+    }
+
+    return '';
+  }
+
+  function arePredictionResultsValid() {
+    return matches.every((match) => getPredictionResultError(match) === '');
+  }
+
   const remainingGames = useMemo(() => {
     return matches.filter((match) => {
       const prediction = predictions[match.id];
@@ -305,6 +348,15 @@ export default function PlayerPage() {
       return;
     }
 
+    const invalidMatch = matches.find(
+      (match) => getPredictionResultError(match) !== ''
+    );
+
+    if (invalidMatch) {
+      setMessage(getPredictionResultError(invalidMatch));
+      return;
+    }
+
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -347,7 +399,9 @@ export default function PlayerPage() {
   }
 
   const fieldsDisabled = alreadySubmitted && !isEditing;
-  const submitDisabled = !isRoundComplete() || deadlineHasPassed;
+  const hasInvalidPredictionResult = !arePredictionResultsValid();
+  const submitDisabled =
+    !isRoundComplete() || hasInvalidPredictionResult || deadlineHasPassed;
 
   return (
     <div className="page">
@@ -461,6 +515,7 @@ export default function PlayerPage() {
               const prediction = predictions[match.id];
               const selectedOdd = getSelectedOdd(match);
               const selectedPickLabel = getSelectedPickLabel(match);
+              const predictionResultError = getPredictionResultError(match);
 
               return (
                 <div
@@ -560,6 +615,12 @@ export default function PlayerPage() {
                       </div>
                     </div>
                   )}
+
+                  {predictionResultError && (
+                    <div className="message" style={{ marginTop: 14 }}>
+                      {predictionResultError}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -580,8 +641,14 @@ export default function PlayerPage() {
 
                 {!deadlineHasPassed && submitDisabled && (
                   <p>
-                    Preenche todos os jogos para poderes submeter. Faltam{' '}
-                    <strong>{remainingGames}</strong>.
+                    {hasInvalidPredictionResult
+                      ? 'Corrige os resultados exatos que não batem certo com o palpite escolhido.'
+                      : (
+                        <>
+                          Preenche todos os jogos para poderes submeter. Faltam{' '}
+                          <strong>{remainingGames}</strong>.
+                        </>
+                      )}
                   </p>
                 )}
               </div>
